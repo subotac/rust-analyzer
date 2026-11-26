@@ -17,6 +17,19 @@ fn closure_in_enum_discriminant_does_not_panic() {
 }
 
 #[test]
+fn async_closure_in_const_argument_does_not_panic() {
+    check(
+        r#"
+//- minicore: async_fn
+fn f<const N: u8>() {
+    f::<{ async |ref x: isize| {} }>();
+       // ^^^^^^^^^^^^^^^^^^^^^^^ expected u8, got impl AsyncFn(isize)
+}
+"#,
+    );
+}
+
+#[test]
 fn bug_484() {
     check_infer(
         r#"

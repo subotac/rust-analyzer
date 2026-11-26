@@ -326,10 +326,15 @@ impl<'db> InferenceContext<'db> {
                 let Statement::Let { pat, initializer: Some(init), .. } = *stmt else {
                     panic!();
                 };
-                let Pat::Bind { .. } = self.store[pat] else {
+                let Pat::Bind { id, .. } = self.store[pat] else {
                     // Complex pattern, skip the non-upvar local.
                     continue;
                 };
+                if matches!(self.store[id].mode, BindingAnnotation::Ref | BindingAnnotation::RefMut)
+                {
+                    // The reference binding borrows from a local already moved into the coroutine.
+                    continue;
+                }
                 let Expr::Path(path) = &self.store[init] else {
                     panic!();
                 };
