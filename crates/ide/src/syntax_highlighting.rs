@@ -201,8 +201,7 @@ pub(crate) fn highlight(
     let sema = Semantics::new(db);
     let file_id = sema.attach_first_edition(file_id);
 
-    // Determine the root based on the given range.
-    let (root, range_to_highlight) = {
+    let (root, range_to_highlight, output_range) = {
         let file = sema.parse(file_id);
         let source_file = file.syntax();
         match range_to_highlight {
@@ -211,16 +210,32 @@ pub(crate) fn highlight(
                     NodeOrToken::Node(it) => it,
                     NodeOrToken::Token(it) => it.parent().unwrap_or_else(|| source_file.clone()),
                 };
-                (node, range)
+                // Enter the same enclosing bodies and macros as a full-file traversal.
+                let root = node
+                    .ancestors()
+                    .take_while(|ancestor| ancestor != source_file)
+                    .last()
+                    .unwrap_or_else(|| source_file.clone());
+                (root, range, node.text_range())
             }
-            None => (source_file.clone(), source_file.text_range()),
+            None => (source_file.clone(), source_file.text_range(), source_file.text_range()),
         }
     };
 
     let mut hl = highlights::Highlights::new(root.text_range());
     let krate = sema.scope(&root).map(|it| it.krate());
     traverse(&mut hl, &sema, config, InRealFile::new(file_id, &root), krate, range_to_highlight);
-    hl.to_vec()
+    let mut result = hl.to_vec();
+    if output_range != root.text_range() {
+        result.retain_mut(|highlight| match highlight.range.intersect(output_range) {
+            Some(range) if !range.is_empty() => {
+                highlight.range = range;
+                true
+            }
+            _ => false,
+        });
+    }
+    result
 }
 
 fn traverse(
@@ -248,16 +263,13 @@ fn traverse(
 
     let empty = FxHashSet::default();
 
-    // FIXME: accommodate range highlighting
     let mut tt_level = 0;
-    // FIXME: accommodate range highlighting
     let mut attr_or_derive_item = None;
 
     // FIXME: these are not perfectly accurate, we determine them by the real file's syntax tree
     // an attribute nested in a macro call will not emit `inside_attribute`
     let mut inside_attribute = false;
 
-    // FIXME: accommodate range highlighting
     let mut body_stack: Vec<Option<ExpressionStoreOwner>> = vec![];
     let mut per_body_cache: FxHashMap<ExpressionStoreOwner, FxHashSet<_>> = FxHashMap::default();
 
@@ -273,6 +285,9 @@ fn traverse(
 
         // Element outside of the viewport, no need to highlight
         if range_to_highlight.intersect(range).is_none() {
+            if matches!(event, Enter(_)) {
+                preorder.skip_subtree();
+            }
             continue;
         }
 

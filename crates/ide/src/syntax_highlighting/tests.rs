@@ -1381,6 +1381,47 @@ fn benchmark_syntax_highlighting_parser() {
 }
 
 #[test]
+fn highlight_range_preserves_enclosing_context() {
+    for source in [
+        r#"
+unsafe fn f() {}
+fn main() {
+    unsafe { $0f()$0; }
+}
+"#,
+        r#"
+//- proc_macros: identity
+struct Foo;
+impl Foo {
+    fn method(&self) {}
+}
+#[proc_macros::identity]
+fn main() {
+    $0Foo.method()$0;
+}
+"#,
+    ] {
+        let (analysis, range) = fixture::range(source);
+        let expected: Vec<_> = analysis
+            .highlight(HL_CONFIG, range.file_id)
+            .unwrap()
+            .into_iter()
+            .filter(|it| range.range.contains_range(it.range) && it.highlight.tag != HlTag::None)
+            .map(|it| (it.range, it.highlight, it.binding_hash))
+            .collect();
+        assert!(!expected.is_empty());
+        let actual: Vec<_> = analysis
+            .highlight_range(HL_CONFIG, range)
+            .unwrap()
+            .into_iter()
+            .filter(|it| range.range.contains_range(it.range) && it.highlight.tag != HlTag::None)
+            .map(|it| (it.range, it.highlight, it.binding_hash))
+            .collect();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
 fn highlight_trait_with_lifetimes_regression_16958() {
     let (analysis, file_id) = fixture::file(
         r#"
